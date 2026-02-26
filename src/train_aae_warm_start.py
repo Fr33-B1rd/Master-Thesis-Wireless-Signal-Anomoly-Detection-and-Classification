@@ -1,0 +1,209 @@
+import argparse
+import os
+import pickle
+import torch
+import torch.nn as nn
+from torch.optim import Adam
+from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.tensorboard import SummaryWriter
+from torchvision.utils import save_image
+import numpy as np
+import json
+
+from models import VAE, Discriminator
+from utils import calc_auc, setup_seed, forward_pass
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train Tuned AAE Warm Start.")
+    parser.add_argument("--dataset", default="16QAM", help="Dataset name.")
+    parser.add_argument("--run", default="warm_start", help="Run name.")
+    parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs.")
+    parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate.")
+    parser.add_argument("--bottle", type=int, default=75, help="Latent dimension size.")
+    parser.add_argument("--pretrained_path", required=True, help="Path to pretrained Conv-VAE model.")
+    return parser.parse_args()
+
+def main():
+    args = parse_args()
+    setup_seed(99)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    # Paths
+    dataset_name = args.dataset.strip()
+    run_name = args.run.strip()
+    OUT_DIR = os.path.join(".", "runs", f"{dataset_name}_aae_warm_{run_name}")
+    DATA_PATH = os.path.join(".", "datasets", "IAD", f"{dataset_name}_Train_Test.pkl")
+    
+    os.makedirs(OUT_DIR, exist_ok=True)
+    writer = SummaryWriter(OUT_DIR)
+
+    # Load Data
+    print(f"Loading data from {DATA_PATH}...")
+    with open(DATA_PATH, "rb") as f:
+        data = pickle.load(f)
+
+    train_data = torch.from_numpy(data["train_data"]) if isinstance(data["train_data"], np.ndarray) else data["train_data"]
+    test_data = torch.from_numpy(data["test_data"]) if isinstance(data["test_data"], np.ndarray) else data["test_data"]
+    test_label = torch.from_numpy(data["test_label"]) if isinstance(data["test_label"], np.ndarray) else data["test_label"]
+    
+    dummy_train_label = torch.zeros(len(train_data))
+    
+    train_loader = DataLoader(
+        dataset=TensorDataset(train_data, dummy_train_label),
+        batch_size=64,
+        shuffle=True
+    )
+    test_loader = DataLoader(
+        dataset=TensorDataset(test_data, test_label),
+        batch_size=64,
+        shuffle=False
+    )
+
+    # Initialize Model
+    print(f"Initializing AAE with Warm Start...")
+    model = VAE(bottle=args.bottle).to(device)
+    discriminator = Discriminator(bottle=args.bottle).to(device)
+
+    # Load Pretrained Weights
+    print(f"Loading pretrained weights from {args.pretrained_path}...")
+    if os.path.exists(args.pretrained_path):
+        model.load_state_dict(torch.load(args.pretrained_path, map_location=device))
+        print("Weights loaded successfully.")
+    else:
+        print(f"Error: Pretrained path {args.pretrained_path} not found!")
+        return
+
+    # Optimizers
+    optimizer_G = Adam(model.parameters(), lr=args.lr) # Low LR to finetune
+    optimizer_D = Adam(discriminator.parameters(), lr=args.lr)
+
+    best_mae_auc = 0
+    
+    # Calculate initial performance
+    model.eval()
+    with torch.no_grad():
+        inputs_list, labels_list, recons_list = [], [], []
+        for val_data, val_label in test_loader:
+            (val_recon, _, _), val_input = forward_pass(model, val_data, device)
+            inputs_list.append(val_input)
+            labels_list.append(val_label)
+            recons_list.append(val_recon)
+        inputs = torch.cat(inputs_list, dim=0)
+        labels = torch.cat(labels_list, dim=0)
+        recons = torch.cat(recons_list, dim=0)
+        mae_auc, mse_auc, _, per_auc = calc_auc(inputs, labels, recons)
+        print(f"[Initial] AUCs: MAE={mae_auc:.4f}, MSE={mse_auc:.4f}, PER={per_auc:.4f}")
+        best_mae_auc = mae_auc
+
+    print("Starting training...")
+    for epoch in range(args.epochs):
+        model.train()
+        discriminator.train()
+            
+        epoch_recon_loss = 0
+        epoch_d_loss = 0
+        epoch_g_loss = 0
+        
+        for idx, (batch_data, _) in enumerate(train_loader):
+            # Forward pass
+            (recons, mean, logvar), x_input = forward_pass(model, batch_data, device)
+            
+            # 1. Reconstruction Phase
+            optimizer_G.zero_grad()
+            recon_loss = ((recons - x_input)**2).sum()
+            recon_loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer_G.step()
+            
+            # 2. Regularization Phase
+            model.eval() 
+            z_fake = model.resample(mean, logvar).detach()
+            z_real = torch.randn_like(z_fake).to(device)
+            
+            # Train Discriminator
+            optimizer_D.zero_grad()
+            d_real = discriminator(z_real)
+            d_fake = discriminator(z_fake)
+            
+            d_loss = -torch.mean(
+                0.9 * torch.log(d_real + 1e-8) +
+                0.1 * torch.log(1 - d_real + 1e-8) +
+                0.1 * torch.log(d_fake + 1e-8) +
+                0.9 * torch.log(1 - d_fake + 1e-8)
+            )
+            
+            d_loss.backward()
+            torch.nn.utils.clip_grad_norm_(discriminator.parameters(), 1.0)
+            optimizer_D.step()
+            
+            # Train Generator (Encoder)
+            model.train()
+            optimizer_G.zero_grad()
+            
+            (_, mean_new, logvar_new), _ = forward_pass(model, batch_data, device)
+            z_new = model.resample(mean_new, logvar_new)
+            
+            d_fake_new = discriminator(z_new)
+            g_loss = -torch.mean(torch.log(d_fake_new + 1e-8))
+            
+            g_loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer_G.step()
+            
+            epoch_recon_loss += recon_loss.item()
+            epoch_d_loss += d_loss.item()
+            epoch_g_loss += g_loss.item()
+            
+            step = idx + len(train_loader) * epoch
+            writer.add_scalars("loss", {
+                "recon": recon_loss.item(),
+                "d_loss": d_loss.item(),
+                "g_loss": g_loss.item()
+            }, step)
+
+        if epoch % 5 == 0:
+            print(f"Epoch {epoch}: Recon={epoch_recon_loss/len(train_loader):.1f}, D={epoch_d_loss/len(train_loader):.3f}, G={epoch_g_loss/len(train_loader):.3f}")
+
+        # Validation
+        if epoch % 5 == 4:
+            model.eval()
+            with torch.no_grad():
+                inputs_list, labels_list, recons_list = [], [], []
+                
+                for val_data, val_label in test_loader:
+                    (val_recon, _, _), val_input = forward_pass(model, val_data, device)
+                    inputs_list.append(val_input)
+                    labels_list.append(val_label)
+                    recons_list.append(val_recon)
+                
+                inputs = torch.cat(inputs_list, dim=0)
+                labels = torch.cat(labels_list, dim=0)
+                recons = torch.cat(recons_list, dim=0)
+                
+                mae_auc, mse_auc, _, per_auc = calc_auc(inputs, labels, recons)
+                
+                print(f"[Val] Epoch {epoch} AUCs: MAE={mae_auc:.4f}, MSE={mse_auc:.4f}, PER={per_auc:.4f}")
+                
+                stats = {
+                    "epoch": epoch,
+                    "mae_auc": float(mae_auc),
+                    "mse_auc": float(mse_auc),
+                    "per_auc": float(per_auc)
+                }
+                
+                writer.add_scalars("auc", {
+                    "mae": mae_auc,
+                    "mse": mse_auc,
+                    "per": per_auc
+                }, step)
+                
+                if mae_auc > best_mae_auc:
+                    best_mae_auc = mae_auc
+                    torch.save(model.state_dict(), f"{OUT_DIR}/best_model.pth")
+                    with open(f"{OUT_DIR}/best_stats.json", "w") as f:
+                        json.dump(stats, f, indent=4)
+                    print(f"New best model saved with MAE AUC: {best_mae_auc:.4f}")
+
+if __name__ == "__main__":
+    main()

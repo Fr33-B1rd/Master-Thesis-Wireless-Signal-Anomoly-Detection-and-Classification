@@ -1,0 +1,51 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local experiment artifacts
+runs/
+experiment_results.csv
+
+# Dataset binaries
+datasets/
+ref_code/
+
+# TensorBoard / logs
+events.out.tfevents.*
+*.log
+
+# Model checkpoints and large binaries
+*.pth
+*.pt
+*.ckpt
+*.pkl
+*.npy
+*.npz
+
+# Keep exported result images
+!artifacts/
+!artifacts/spectrograms/
+!artifacts/spectrograms/**/
+!artifacts/spectrograms/**/*.png
