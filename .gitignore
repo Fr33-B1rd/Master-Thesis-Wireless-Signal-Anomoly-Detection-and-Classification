@@ -1,4 +1,4 @@
-# Python cache
+# Python caches and bytecode
 __pycache__/
 *.py[cod]
 *$py.class
@@ -9,43 +9,33 @@ venv/
 env/
 .env/
 
-# Build / packaging
-build/
-dist/
-*.egg-info/
+# Tooling caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .ipynb_checkpoints/
 
-# OS / editor
-.DS_Store
-Thumbs.db
+# Local editor/config state
+.claude/
 .idea/
 .vscode/
+.DS_Store
+Thumbs.db
 
-# Local experiment artifacts
+# Generated experiment outputs
+outputs/
 runs/
-experiment_results.csv
-
-# Dataset binaries
-datasets/
-ref_code/
-
-# TensorBoard / logs
-events.out.tfevents.*
+wandb/
+logs/
 *.log
+events.out.tfevents.*
 
-# Model checkpoints and large binaries
-*.pth
-*.pt
+# Large model and data artifacts
 *.ckpt
-*.pkl
+*.h5
 *.npy
 *.npz
-
-# Keep exported result images
-!artifacts/
-!artifacts/spectrograms/
-!artifacts/spectrograms/**/
-!artifacts/spectrograms/**/*.png
+*.onnx
+*.pkl
+*.pt
+*.pth

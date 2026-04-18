@@ -1,38 +1,61 @@
-# 16QAM Models Best Results
+# Anomaly Localization
 
-| Model | Epoch | MAE AUC | MSE AUC | PER AUC | Rel AUC |
-|---|---:|---:|---:|---:|---:|
-| conv_vae | 179 | 0.880970 | 0.939872 | 0.988436 | 0.867810 |
-| aae | 199 | 0.838679 | 0.875546 | 0.961373 | 0.816951 |
-| beta_vae | 164 | 0.833666 | 0.904798 | 0.983380 | 0.747765 |
-| conv_ae | 59 | 0.859995 | 0.896503 | 0.979571 | 0.893470 |
+This repository contains PatchCore-based experiments for RF spectrogram anomaly detection, localization, clustering, and open-set analysis.
 
-## Test Spectrogram Comparison
+## Scope
 
-> Each image is a grid sampled from the 16QAM test set (`input` vs `reconstruction`).
+The code is organized around three dataset families:
 
-| Model | Normal Input | Normal Output | Anomaly Input | Anomaly Output |
-|---|---|---|---|---|
-| conv_vae | ![](artifacts/spectrograms/16QAM/conv_vae/input-test-n.png) | ![](artifacts/spectrograms/16QAM/conv_vae/output-test-n.png) | ![](artifacts/spectrograms/16QAM/conv_vae/input-test-a.png) | ![](artifacts/spectrograms/16QAM/conv_vae/output-test-a.png) |
-| aae | ![](artifacts/spectrograms/16QAM/aae/input-test-n.png) | ![](artifacts/spectrograms/16QAM/aae/output-test-n.png) | ![](artifacts/spectrograms/16QAM/aae/input-test-a.png) | ![](artifacts/spectrograms/16QAM/aae/output-test-a.png) |
-| beta_vae | ![](artifacts/spectrograms/16QAM/beta_vae/input-test-n.png) | ![](artifacts/spectrograms/16QAM/beta_vae/output-test-n.png) | ![](artifacts/spectrograms/16QAM/beta_vae/input-test-a.png) | ![](artifacts/spectrograms/16QAM/beta_vae/output-test-a.png) |
-| conv_ae | ![](artifacts/spectrograms/16QAM/conv_ae/input-test-n.png) | ![](artifacts/spectrograms/16QAM/conv_ae/output-test-n.png) | ![](artifacts/spectrograms/16QAM/conv_ae/input-test-a.png) | ![](artifacts/spectrograms/16QAM/conv_ae/output-test-a.png) |
+- `IAD`: anomaly detection on PKL-based modulation datasets
+- `WSAD`: PatchCore experiments on packed array splits
+- `SAS`: spectrogram anomaly detection, clustering, and open-set rejection
 
-## Training Scope
+The main workflow is:
 
-- Dataset: **IAD 16QAM**.
-- Epochs: 200 
-- Additional cross-dataset checks were run on **CHIRP / GMSK / QPSK** (60-epoch quick validation) to test trend consistency.
+1. Train `PatchCore` on normal training data.
+2. Evaluate anomaly scores and localization maps on test data.
+3. Optionally export patch-level artifacts.
+4. Reuse those artifacts for clustering or downstream open-set analysis.
 
-## Brief Analysis
+## Main Scripts
 
-- In this setting, `conv_vae` is the strongest baseline on overall metrics.
-- `beta_vae` improves significantly after tuning (`input_scale=10`, no output sigmoid, tuned beta), and is close to `conv_vae` on PER.
-- `conv_ae` is competitive (near `beta_vae`) but its current best comes from a shorter run, so direct ranking vs 200-epoch runs is not fully fair.
-- `aae` is currently the weakest among the four under the tested setup.
+- [`train_eval_patchcore.py`](C:/Users/Zhuoer/code/thesis/Anomaly_Localization/train_eval_patchcore.py)  
+  PatchCore training and evaluation for the original IAD PKL datasets.
 
-## Next Improvements
+- [`train_eval_patchcore_iad_shared.py`](C:/Users/Zhuoer/code/thesis/Anomaly_Localization/train_eval_patchcore_iad_shared.py)  
+  Shared-feature-space PatchCore for combined IAD normal training sets.
 
-- Add small per-dataset hyperparameter tuning instead of one shared setting (especially `beta`, LR, and regularization).
-- Stabilize metric comparability by keeping PER settings and input/output scaling fixed across all model runs.
-- For `aae`, prioritize training-stability upgrades (objective/regularization schedule) before further architecture changes.
+- [`train_eval_patchcore_wsad.py`](C:/Users/Zhuoer/code/thesis/Anomaly_Localization/train_eval_patchcore_wsad.py)  
+  PatchCore implementation for WSAD array datasets.
+
+- [`train_eval_patchcore_sas.py`](C:/Users/Zhuoer/code/thesis/Anomaly_Localization/train_eval_patchcore_sas.py)  
+  PatchCore training and evaluation for packed SAS spectrogram datasets.
+
+- [`cluster_patchcore_anomalies.py`](C:/Users/Zhuoer/code/thesis/Anomaly_Localization/cluster_patchcore_anomalies.py)  
+  Clustering pipeline for IAD anomaly samples.
+
+- [`cluster_patchcore_sas.py`](C:/Users/Zhuoer/code/thesis/Anomaly_Localization/cluster_patchcore_sas.py)  
+  Clustering pipeline for SAS anomaly samples.
+
+- [`evaluate_sas_open_set_ocsvm_gate.py`](C:/Users/Zhuoer/code/thesis/Anomaly_Localization/evaluate_sas_open_set_ocsvm_gate.py)  
+  Open-set evaluation for SAS using a known-class classifier plus per-class OCSVM rejection.
+
+- [`evaluate_sas_open_set_ocsvm_tone_gamma.py`](C:/Users/Zhuoer/code/thesis/Anomaly_Localization/evaluate_sas_open_set_ocsvm_tone_gamma.py)  
+  Targeted sweep of the tone-class OCSVM gamma in the SAS open-set pipeline.
+
+## Typical Outputs
+
+Generated results are written to [`outputs`](C:/Users/Zhuoer/code/thesis/Anomaly_Localization/outputs) and usually include:
+
+- metrics JSON files
+- score CSV files
+- ROC and confusion matrix figures
+- anomaly heatmap montages
+- clustering summaries and UMAP plots
+- exported patch artifacts for downstream analysis
+
+## Notes
+
+- The `support` directory stores secondary or exploratory utilities that are not part of the main root workflow.
+- Most scripts are command-line entry points and are intended to be run directly with Python.
+- The current project emphasis is on PatchCore feature reuse rather than end-to-end deep classification.
