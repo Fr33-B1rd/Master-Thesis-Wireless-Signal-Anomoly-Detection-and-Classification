@@ -1,51 +1,28 @@
-# Python cache
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
-
-# Virtual environments
-.venv/
-venv/
-env/
-.env/
-
-# Build / packaging
-build/
-dist/
 *.egg-info/
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.ipynb_checkpoints/
 
-# OS / editor
+# Local environment
+.venv/
+.env
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# OS
 .DS_Store
 Thumbs.db
-.idea/
-.vscode/
 
-# Local experiment artifacts
-runs/
-experiment_results.csv
-
-# Dataset binaries
-datasets/
-ref_code/
-
-# TensorBoard / logs
-events.out.tfevents.*
-*.log
-
-# Model checkpoints and large binaries
-*.pth
-*.pt
-*.ckpt
-*.pkl
+# Large generated artifacts — keep locally, do not version
+outputs/
 *.npy
 *.npz
+*.pt
 
-# Keep exported result images
-!artifacts/
-!artifacts/spectrograms/
-!artifacts/spectrograms/**/
-!artifacts/spectrograms/**/*.png
+# Notes: _archive/ is kept under version control so cleaned-up history is
+# reviewable; uncomment the next line if you decide to drop it instead.
+# _archive/

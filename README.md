@@ -1,38 +1,46 @@
-# 16QAM Models Best Results
+# Anomaly Localization
 
-| Model | Epoch | MAE AUC | MSE AUC | PER AUC | Rel AUC |
-|---|---:|---:|---:|---:|---:|
-| conv_vae | 179 | 0.880970 | 0.939872 | 0.988436 | 0.867810 |
-| aae | 199 | 0.838679 | 0.875546 | 0.961373 | 0.816951 |
-| beta_vae | 164 | 0.833666 | 0.904798 | 0.983380 | 0.747765 |
-| conv_ae | 59 | 0.859995 | 0.896503 | 0.979571 | 0.893470 |
+ConvNeXtV2 open-world pipeline for SAS RF spectrogram anomaly detection and unknown-class discovery. Stage 1 uses PatchCore for ROI localization; Stage 2 is a 1-channel ConvNeXtV2-tiny classifier with energy-based open-set gating and HDBSCAN+UMAP unknown-class absorption.
 
-## Test Spectrogram Comparison
+For operational details (dataset paths, input-channel modes, run commands, results, caveats) see [HANDOFF.md](HANDOFF.md).
 
-> Each image is a grid sampled from the 16QAM test set (`input` vs `reconstruction`).
+## Repository layout
 
-| Model | Normal Input | Normal Output | Anomaly Input | Anomaly Output |
-|---|---|---|---|---|
-| conv_vae | ![](artifacts/spectrograms/16QAM/conv_vae/input-test-n.png) | ![](artifacts/spectrograms/16QAM/conv_vae/output-test-n.png) | ![](artifacts/spectrograms/16QAM/conv_vae/input-test-a.png) | ![](artifacts/spectrograms/16QAM/conv_vae/output-test-a.png) |
-| aae | ![](artifacts/spectrograms/16QAM/aae/input-test-n.png) | ![](artifacts/spectrograms/16QAM/aae/output-test-n.png) | ![](artifacts/spectrograms/16QAM/aae/input-test-a.png) | ![](artifacts/spectrograms/16QAM/aae/output-test-a.png) |
-| beta_vae | ![](artifacts/spectrograms/16QAM/beta_vae/input-test-n.png) | ![](artifacts/spectrograms/16QAM/beta_vae/output-test-n.png) | ![](artifacts/spectrograms/16QAM/beta_vae/input-test-a.png) | ![](artifacts/spectrograms/16QAM/beta_vae/output-test-a.png) |
-| conv_ae | ![](artifacts/spectrograms/16QAM/conv_ae/input-test-n.png) | ![](artifacts/spectrograms/16QAM/conv_ae/output-test-n.png) | ![](artifacts/spectrograms/16QAM/conv_ae/input-test-a.png) | ![](artifacts/spectrograms/16QAM/conv_ae/output-test-a.png) |
+```
+.
+├── HANDOFF.md                              # operational source of truth
+├── simulate_sas_convnextv2_open_world.py   # main entry (Stage 2 open-world)
+├── evaluate_sas_open_set_convnextv2.py     # static open-set baseline
+├── train_eval_patchcore_sas.py             # Stage 1 PatchCore driver (CLI + main)
+├── core/                                   # dataset-neutral functional modules
+│   ├── patchcore.py                        #   PatchCore model, ArrayDataset2D, feature extractor
+│   ├── viz.py                              #   AUROC/ROC/CM plotting, score CSV, anomaly montage
+│   └── metrics.py                          #   pixel-AUROC + AUPRO localization metrics
+├── dataio/                                 # dataset-specific loaders (renamed from datasets/
+│   └── sas/bundle.py                       #     to avoid shadowing HuggingFace `datasets`)
+├── cluster_patchcore_sas.py                # patch-feature clustering driver
+├── sas_open_world/                         # Stage 2 package (incl. models/, experiments/)
+├── scripts/                                # shell drivers for repeatable runs
+├── outputs/                                # all run artifacts (not versioned)
+└── _archive/                               # retired code and scripts, not on import path
+```
 
-## Training Scope
+## Main entry point
 
-- Dataset: **IAD 16QAM**.
-- Epochs: 200 
-- Additional cross-dataset checks were run on **CHIRP / GMSK / QPSK** (60-epoch quick validation) to test trend consistency.
+```bash
+python simulate_sas_convnextv2_open_world.py \
+  --dataset-dir <path-to-packed-SAS-dataset> \
+  --output-dir <run-output-dir> \
+  --patchcore-output-dir <stage1-patchcore-output-dir> \
+  --input-mode roi \
+  --input-channels mag_1ch \
+  --seed 42
+```
 
-## Brief Analysis
+Reproducible 3-seed runs live in `scripts/ablation_mag_1ch.sh` (main) and `scripts/ablation_2ch_vs_3ch.sh` (ablation).
 
-- In this setting, `conv_vae` is the strongest baseline on overall metrics.
-- `beta_vae` improves significantly after tuning (`input_scale=10`, no output sigmoid, tuned beta), and is close to `conv_vae` on PER.
-- `conv_ae` is competitive (near `beta_vae`) but its current best comes from a shorter run, so direct ranking vs 200-epoch runs is not fully fair.
-- `aae` is currently the weakest among the four under the tested setup.
+## Notes
 
-## Next Improvements
-
-- Add small per-dataset hyperparameter tuning instead of one shared setting (especially `beta`, LR, and regularization).
-- Stabilize metric comparability by keeping PER settings and input/output scaling fixed across all model runs.
-- For `aae`, prioritize training-stability upgrades (objective/regularization schedule) before further architecture changes.
+- Stage 1 PatchCore output (`anomaly_outputs.npz`) must exist before any ROI-mode Stage 2 run.
+- `outputs/`, `__pycache__/`, and raw `*.npy` / `*.npz` / `*.pt` artifacts are excluded from version control (see `.gitignore`).
+- Historical code for OCSVM gates, PatchCore-only open-world, DINO feature clustering, and old IAD PatchCore variants is preserved under `_archive/` but is not importable.
